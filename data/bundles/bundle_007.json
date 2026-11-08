@@ -1,0 +1,61 @@
+{
+  "bundle_id": "bundle_007",
+  "timezone": "UTC",
+  "severity": "SEV-1",
+  "affected_services": [
+    "payment",
+    "frontend"
+  ],
+  "lines": [
+    {
+      "id": "LOG:payment:101",
+      "timestamp_utc": "2026-11-05 17:00:00Z",
+      "timestamp_local": "2026-11-05 17:00:00 UTC",
+      "service": "payment",
+      "raw": "LOG:payment:101 [2026-11-05 17:00:00 UTC] ERROR [flagd:paymentServiceFailure] Connection refused to payment-db:5432 during chargeTransaction"
+    },
+    {
+      "id": "TICKET:1",
+      "timestamp_utc": "2026-11-05 17:02:00Z",
+      "timestamp_local": "2026-11-05 17:02:00 UTC",
+      "service": "frontend",
+      "raw": "TICKET:1 [2026-11-05 17:02:00 UTC] SEV-1 Alert triggered: Checkout 5xx rate > 35% (upstream: payment)"
+    },
+    {
+      "id": "CHAT:1",
+      "timestamp_utc": "2026-11-05 17:05:00Z",
+      "timestamp_local": "2026-11-05 17:05:00 UTC",
+      "service": "payment",
+      "raw": "CHAT:1 [2026-11-05 17:05:00 UTC] @oncall: Seeing errors in payment. Maybe a DNS glitch? Skipping RUNBOOK:payment:3 check to restart pods directly."
+    },
+    {
+      "id": "CHAT:2",
+      "timestamp_utc": "2026-11-05 17:12:00Z",
+      "timestamp_local": "2026-11-05 17:12:00 UTC",
+      "service": "payment",
+      "raw": "CHAT:2 [2026-11-05 17:12:00 UTC] @oncall: Disabled paymentServiceFailure in flagd and error rates recovered to normal."
+    }
+  ],
+  "runbook_snippet": "RUNBOOK:payment:3 (payment recovery): Step 3: Verify flagd paymentServiceFailure state and failover to secondary payment gateway replica",
+  "past_postmortem_snippet": "PM:001: Historical outage in payment caused by paymentServiceFailure.",
+  "gold": {
+    "ordered_ids": [
+      "LOG:payment:101",
+      "TICKET:1",
+      "CHAT:1",
+      "CHAT:2"
+    ],
+    "start_utc": "2026-11-05 17:00:00Z",
+    "end_utc": "2026-11-05 17:12:00Z",
+    "root_cause": "payment service failed due to paymentServiceFailure flag causing connection refused on payment-db:5432",
+    "primary_evidence_id": "LOG:payment:101",
+    "runbook_id": "RUNBOOK:payment:3",
+    "runbook_step": 3,
+    "missed_step": "Step 3: Verify flagd paymentServiceFailure state and failover to secondary payment gateway replica",
+    "gap_evidence_id": "CHAT:1",
+    "action_owner_role": "Payment-Service-Owner",
+    "action_priority": "P0",
+    "action_title": "Add automated circuit-breaker failover and flagd health check for payment-db",
+    "similar_pm_id": "PM:001"
+  }
+}

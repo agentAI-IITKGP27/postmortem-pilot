@@ -1,0 +1,61 @@
+{
+  "bundle_id": "bundle_003",
+  "timezone": "PST",
+  "severity": "SEV-1",
+  "affected_services": [
+    "recommendation",
+    "frontend"
+  ],
+  "lines": [
+    {
+      "id": "LOG:recommendation:101",
+      "timestamp_utc": "2026-11-05 13:00:00Z",
+      "timestamp_local": "2026-11-05 05:00:00 PST",
+      "service": "recommendation",
+      "raw": "LOG:recommendation:101 [2026-11-05 05:00:00 PST] ERROR [flagd:recommendationCacheFailure] MemoryError: recommendation in-memory cache exceeded 4096MB limit"
+    },
+    {
+      "id": "TICKET:1",
+      "timestamp_utc": "2026-11-05 13:02:00Z",
+      "timestamp_local": "2026-11-05 05:02:00 PST",
+      "service": "frontend",
+      "raw": "TICKET:1 [2026-11-05 05:02:00 PST] SEV-1 Alert triggered: Checkout 5xx rate > 35% (upstream: recommendation)"
+    },
+    {
+      "id": "CHAT:1",
+      "timestamp_utc": "2026-11-05 13:05:00Z",
+      "timestamp_local": "2026-11-05 05:05:00 PST",
+      "service": "recommendation",
+      "raw": "CHAT:1 [2026-11-05 05:05:00 PST] @oncall: Seeing errors in recommendation. Maybe a DNS glitch? Skipping RUNBOOK:recommendation:4 check to restart pods directly."
+    },
+    {
+      "id": "CHAT:2",
+      "timestamp_utc": "2026-11-05 13:12:00Z",
+      "timestamp_local": "2026-11-05 05:12:00 PST",
+      "service": "recommendation",
+      "raw": "CHAT:2 [2026-11-05 05:12:00 PST] @oncall: Disabled recommendationCacheFailure in flagd and error rates recovered to normal."
+    }
+  ],
+  "runbook_snippet": "RUNBOOK:recommendation:4 (recommendation recovery): Step 4: Flush recommendation Redis/in-memory cache and enforce LRU eviction cap",
+  "past_postmortem_snippet": "PM:003: Historical outage in recommendation caused by recommendationCacheFailure.",
+  "gold": {
+    "ordered_ids": [
+      "LOG:recommendation:101",
+      "TICKET:1",
+      "CHAT:1",
+      "CHAT:2"
+    ],
+    "start_utc": "2026-11-05 13:00:00Z",
+    "end_utc": "2026-11-05 13:12:00Z",
+    "root_cause": "recommendation service experienced exponential cache growth and OOM due to recommendationCacheFailure leak",
+    "primary_evidence_id": "LOG:recommendation:101",
+    "runbook_id": "RUNBOOK:recommendation:4",
+    "runbook_step": 4,
+    "missed_step": "Step 4: Flush recommendation Redis/in-memory cache and enforce LRU eviction cap",
+    "gap_evidence_id": "CHAT:1",
+    "action_owner_role": "ML-Platform-Owner",
+    "action_priority": "P1",
+    "action_title": "Enforce strict LRU memory cap and OOM circuit breaker on recommendation cache",
+    "similar_pm_id": "PM:003"
+  }
+}
