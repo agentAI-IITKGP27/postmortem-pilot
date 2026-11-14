@@ -1,0 +1,8 @@
+window_minutes,num_incidents,evidence_recall,recovery_line_recall,avg_candidates,avg_latency_ms
+1,25,0.25,0.0,1.0,0.459
+2,25,0.5,0.0,2.0,0.422
+5,25,0.75,0.0,3.0,0.425
+10,25,0.75,0.0,3.0,0.407
+12,25,1.0,1.0,4.0,0.415
+15,25,1.0,1.0,4.0,0.412
+full_scan,25,1.0,1.0,4.0,0.359

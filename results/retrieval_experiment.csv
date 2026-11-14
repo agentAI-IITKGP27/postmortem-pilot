@@ -1,0 +1,17 @@
+experiment,strategy,dense_model,rerank_model,chunking,metadata_header,metadata_filter,num_docs,num_chunks,num_queries,recall_at_1,recall_at_5,mrr_at_10,ndcg_at_10,avg_latency_ms
+retrieval_sweep,bm25,BAAI/bge-small-en-v1.5,,section,True,True,100,100,100,0.8,0.98,0.8914,0.9192,0.12
+retrieval_sweep,dense,BAAI/bge-small-en-v1.5,,section,True,True,100,100,100,0.24,0.82,0.4676,0.5864,6.61
+retrieval_sweep,hybrid,BAAI/bge-small-en-v1.5,,section,True,True,100,100,100,0.71,0.99,0.8215,0.8662,6.47
+retrieval_sweep,hybrid_rerank,BAAI/bge-small-en-v1.5,cross-encoder/ms-marco-MiniLM-L-6-v2,section,True,True,100,100,100,0.96,1.0,0.98,0.9852,84.91
+retrieval_sweep,bm25,BAAI/bge-small-en-v1.5,,step,True,True,100,125,100,0.68,0.91,0.7987,0.848,0.16
+retrieval_sweep,dense,BAAI/bge-small-en-v1.5,,step,True,True,100,125,100,0.24,0.8,0.4613,0.5682,7.39
+retrieval_sweep,hybrid,BAAI/bge-small-en-v1.5,,step,True,True,100,125,100,0.62,0.97,0.7689,0.8267,7.02
+retrieval_sweep,hybrid_rerank,BAAI/bge-small-en-v1.5,cross-encoder/ms-marco-MiniLM-L-6-v2,step,True,True,100,125,100,0.96,1.0,0.98,0.9852,76.31
+retrieval_sweep,bm25,BAAI/bge-small-en-v1.5,,section,False,True,100,100,100,0.25,0.88,0.4892,0.6133,0.14
+retrieval_sweep,dense,BAAI/bge-small-en-v1.5,,section,False,True,100,100,100,0.12,0.66,0.3477,0.492,6.43
+retrieval_sweep,hybrid,BAAI/bge-small-en-v1.5,,section,False,True,100,100,100,0.29,0.88,0.5039,0.6216,6.78
+retrieval_sweep,hybrid_rerank,BAAI/bge-small-en-v1.5,cross-encoder/ms-marco-MiniLM-L-6-v2,section,False,True,100,100,100,0.19,0.53,0.3282,0.4282,61.29
+retrieval_sweep,bm25,BAAI/bge-small-en-v1.5,,section,True,False,100,100,100,0.8,0.98,0.8914,0.9192,0.14
+retrieval_sweep,dense,BAAI/bge-small-en-v1.5,,section,True,False,100,100,100,0.24,0.82,0.4676,0.5864,5.78
+retrieval_sweep,hybrid,BAAI/bge-small-en-v1.5,,section,True,False,100,100,100,0.71,1.0,0.8277,0.8712,5.86
+retrieval_sweep,hybrid_rerank,BAAI/bge-small-en-v1.5,cross-encoder/ms-marco-MiniLM-L-6-v2,section,True,False,100,100,100,0.96,1.0,0.98,0.9852,94.89
