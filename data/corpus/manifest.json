@@ -1,0 +1,62 @@
+{
+  "generator": "data/generate_corpus.py",
+  "version": "1.0.0",
+  "seed": 42,
+  "args": {
+    "total": 2000,
+    "n_postmortems": 1540
+  },
+  "n_docs": 2000,
+  "counts_by_set": {
+    "dependency_note": 50,
+    "poisoned": 30,
+    "postmortem": 1540,
+    "runbook": 300,
+    "sop": 80
+  },
+  "counts_by_doc_type": {
+    "dependency_note": 52,
+    "postmortem": 1547,
+    "runbook": 315,
+    "sop": 86
+  },
+  "poison_types": {
+    "blame_laden_postmortem": 4,
+    "conflicting_step_number": 4,
+    "off_topic_lookalike": 4,
+    "pii_secret_leak": 4,
+    "prompt_injection": 8,
+    "stale_runbook": 6
+  },
+  "gold": {
+    "payment": {
+      "runbook": "RUNBOOK:payment:3",
+      "postmortem": "PM:001"
+    },
+    "product-catalog": {
+      "runbook": "RUNBOOK:product-catalog:2",
+      "postmortem": "PM:002"
+    },
+    "recommendation": {
+      "runbook": "RUNBOOK:recommendation:4",
+      "postmortem": "PM:003"
+    },
+    "ad": {
+      "runbook": "RUNBOOK:ad:2",
+      "postmortem": "PM:004"
+    },
+    "cart": {
+      "runbook": "RUNBOOK:cart:3",
+      "postmortem": "PM:005"
+    },
+    "kafka": {
+      "runbook": "RUNBOOK:kafka:1",
+      "postmortem": "PM:006"
+    }
+  },
+  "sha256": {
+    "corpus.jsonl": "499f9e2d3ffe612aae3af8d31b67757ee6a2c2453f858cb238732379a9546bbf",
+    "labels/doc_labels.jsonl": "7451490d4561c3581f423ffc3dcd8516d74981e2658c70fb061046915ed1d154"
+  },
+  "note": "Index corpus.jsonl only. labels/ is ground truth for evaluation and must never be retrievable."
+}
