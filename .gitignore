@@ -4,3 +4,4 @@ certs/
 __pycache__/
 *.pyc
 .DS_Store
+data/corpus/embeddings_cache.json
