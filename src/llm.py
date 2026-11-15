@@ -1,75 +1,96 @@
 import os
-import ssl
 import time
 import threading
-from dotenv import load_dotenv
-from openai import OpenAI, DefaultHttpxClient, APIStatusError, APIConnectionError
+from typing import List
+import httpx
 import instructor
+from openai import OpenAI
+from dotenv import load_dotenv
 
 load_dotenv()
 
-_api_lock = threading.Lock()
-RETRY_DELAYS = [2, 4, 8]
+# Chat LLM Configuration (Port 1033)
+API_KEY = os.getenv("OPENAI_API_KEY", "")
+BASE_URL = os.getenv("OPENAI_BASE_URL", "https://103.42.50.41:1033/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen3-8B")
+CERT_PATH = os.getenv("SSL_CERT_FILE", "certs/vm05-ca.crt")
 
-def get_llm_client():
-    mode = os.getenv("ENV_MODE", "local").lower()
+# Embedding API Configuration (Port 1035)
+EMBED_API_KEY = os.getenv("EMBEDDING_API_KEY", API_KEY)
+EMBED_BASE_URL = os.getenv("EMBEDDING_BASE_URL", "https://103.42.50.41:1035/v1")
+EMBED_MODEL = os.getenv("EMBEDDING_MODEL", "bge-small-en-v1.5")
+EMBED_CERT_PATH = os.getenv("EMBEDDING_CERT_PATH", "certs/vm02-ca.crt")
 
-    if mode == "university":
-        base_url = os.getenv("UNI_BASE_URL")
-        api_key = os.getenv("UNI_API_KEY")
-        model_name = os.getenv("UNI_MODEL_NAME", "Qwen/Qwen3-8B")
-        ca_cert = os.getenv("UNI_CA_CERT_PATH")
+_lock = threading.Lock()
 
-        if not ca_cert or not os.path.exists(ca_cert):
-            raise FileNotFoundError(f"CA certificate not found at: {ca_cert}")
+_http_client = httpx.Client(verify=CERT_PATH if os.path.exists(CERT_PATH) else True, timeout=60.0)
+raw_client = OpenAI(api_key=API_KEY, base_url=BASE_URL, http_client=_http_client)
+structured_client = instructor.from_openai(raw_client, mode=instructor.Mode.JSON)
 
-        ssl_ctx = ssl.create_default_context(cafile=ca_cert)
-        http_client = DefaultHttpxClient(verify=ssl_ctx, timeout=60.0)
-        raw_client = OpenAI(base_url=base_url, api_key=api_key, http_client=http_client, max_retries=0)
-    else:
-        base_url = os.getenv("LOCAL_BASE_URL", "http://localhost:11434/v1")
-        api_key = os.getenv("LOCAL_API_KEY", "ollama")
-        model_name = os.getenv("LOCAL_MODEL_NAME", "qwen2.5:7b-instruct")
-        raw_client = OpenAI(base_url=base_url, api_key=api_key, max_retries=2)
+_embed_verify = EMBED_CERT_PATH if os.path.exists(EMBED_CERT_PATH) else True
+_embed_http_client = httpx.Client(verify=_embed_verify, timeout=60.0)
+embed_client = OpenAI(api_key=EMBED_API_KEY, base_url=EMBED_BASE_URL, http_client=_embed_http_client)
 
-    structured_client = instructor.from_openai(raw_client, mode=instructor.Mode.JSON)
-    return raw_client, structured_client, model_name
-
-def call_chat(messages, max_tokens=512, temperature=0.1, response_format=None, tools=None):
-    raw_client, _, model_name = get_llm_client()
-    safe_max_tokens = min(max(1, max_tokens), 1024)
-
-    kwargs = {
-        "model": model_name,
-        "messages": messages,
-        "max_tokens": safe_max_tokens,
-        "temperature": temperature,
-    }
-    if response_format:
-        kwargs["response_format"] = response_format
-    if tools:
-        kwargs["tools"] = tools
-
-    with _api_lock:
-        for attempt, delay in enumerate([0] + RETRY_DELAYS):
-            if delay > 0:
-                print(f"API busy (429/503). Waiting {delay}s before retry {attempt}/{len(RETRY_DELAYS)}...")
-                time.sleep(delay)
-            try:
+def call_chat(messages, max_tokens=512, temperature=0.1, response_format=None):
+    max_tokens = min(max_tokens, 1024)
+    for delay in [2, 4, 8, 0]:
+        try:
+            with _lock:
+                kwargs = {
+                    "model": MODEL_NAME,
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                }
+                if response_format:
+                    kwargs["response_format"] = response_format
                 return raw_client.chat.completions.create(**kwargs)
-            except APIStatusError as e:
-                if e.status_code in (429, 503) and attempt < len(RETRY_DELAYS):
-                    continue
-                raise
-            except APIConnectionError:
-                if attempt < len(RETRY_DELAYS):
-                    continue
-                raise
+        except Exception as e:
+            if delay == 0:
+                raise e
+            time.sleep(delay)
+
+def call_structured(messages, response_model, max_tokens=512, temperature=0.1, max_retries=2):
+    max_tokens = min(max_tokens, 1024)
+    for delay in [2, 4, 8, 0]:
+        try:
+            with _lock:
+                return structured_client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=messages,
+                    response_model=response_model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    max_retries=max_retries,
+                )
+        except Exception as e:
+            if delay == 0:
+                raise e
+            time.sleep(delay)
+
+def call_embeddings(texts: List[str]) -> List[List[float]]:
+    all_vectors: List[List[float]] = []
+    batch_size = 16
+
+    for start in range(0, len(texts), batch_size):
+        batch = [t[:1800] for t in texts[start : start + batch_size]]
+        for delay in [2, 4, 8, 0]:
+            try:
+                with _lock:
+                    resp = embed_client.embeddings.create(
+                        model=EMBED_MODEL,
+                        input=batch,
+                    )
+                sorted_data = sorted(resp.data, key=lambda item: item.index)
+                all_vectors.extend([item.embedding for item in sorted_data])
+                break
+            except Exception as e:
+                if delay == 0:
+                    raise e
+                time.sleep(delay)
+
+    return all_vectors
 
 if __name__ == "__main__":
-    resp = call_chat(
-        messages=[{"role": "user", "content": "Return a JSON object with keys 'project' set to 'PostmortemPilot' and 'status' set to 'ready'."}],
-        max_tokens=100,
-        response_format={"type": "json_object"}
-    )
-    print("Python Client Test Output:", resp.choices[0].message.content)
+    vecs = call_embeddings(["Example document chunk", "Example search query"])
+    print(f"Embedding API verified! Returned {len(vecs)} vectors of dimension {len(vecs[0])}.")
