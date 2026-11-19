@@ -1,0 +1,7 @@
+run_name,retrieval_miss,reasoning_error,tool_call_error,hallucination,unsupported_claim,timeline_error
+official_run_1,0,0,0,0,0,0
+official_run_2,0,0,0,0,0,0
+official_run_3,0,0,0,0,0,0
+single_rag_ablation,0,18,0,0,0,15
+week1_zero_shot,0,55,0,0,0,15
+week1_schema_cot,0,19,0,0,0,10

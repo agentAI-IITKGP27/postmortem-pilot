@@ -1,0 +1,11 @@
+services:
+  postmortem-pilot:
+    build: .
+    container_name: postmortem-pilot-workbench
+    ports:
+      - "8501:8501"
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+    restart: unless-stopped
