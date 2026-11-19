@@ -174,7 +174,12 @@ def main():
                 st.info(state.get("primary_service", "Unknown"))
             with col2:
                 st.markdown("#### Severity / Governance")
-                st.warning("P1 - HITL Gated Workflow")
+                severity = state.get("severity") or "P1"
+                action_priority = (state.get("action_item") or {}).get("priority")
+                if action_priority and action_priority != severity:
+                    st.warning(f"{severity} ({action_priority}) - HITL Gated Workflow")
+                else:
+                    st.warning(f"{severity} - HITL Gated Workflow")
 
             st.markdown("#### Root Cause Analysis")
             st.markdown(f"> {state.get('root_cause', 'No root cause synthesized.')}")
