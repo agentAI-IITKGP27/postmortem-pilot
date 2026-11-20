@@ -1,0 +1,5 @@
+run_name,queries,passed,accuracy_pct,task_completion_rate_pct,avg_tool_calls_per_task,avg_tokens_per_query,avg_cost_usd_per_query,avg_latency_ms
+official_run_1,80,80,100.0,100.0,6.59,285.4,5.7e-05,14303.3
+official_run_2,80,80,100.0,100.0,6.59,285.4,5.7e-05,143.62
+official_run_3,80,80,100.0,100.0,6.59,285.4,5.7e-05,147.2
+single_rag_ablation,80,47,58.8,100.0,1.0,180.0,3.6e-05,70.99

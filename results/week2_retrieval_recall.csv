@@ -1,0 +1,15 @@
+experiment_group,configuration,service_filter,recall_at_1,recall_at_3,recall_at_5,recall_at_10
+retrieval_mode,bm25,False,100.0,100.0,100.0,100.0
+retrieval_mode,bm25,True,100.0,100.0,100.0,100.0
+retrieval_mode,dense,False,39.3,42.9,46.4,71.4
+retrieval_mode,dense,True,39.3,100.0,100.0,100.0
+retrieval_mode,hybrid,False,57.1,100.0,100.0,100.0
+retrieval_mode,hybrid,True,57.1,100.0,100.0,100.0
+retrieval_mode,hybrid_rerank,False,92.9,100.0,100.0,100.0
+retrieval_mode,hybrid_rerank,True,92.9,100.0,100.0,100.0
+chunking_study,per_step_no_header,False,66.7,66.7,66.7,83.3
+chunking_study,per_step_with_header,False,41.7,83.3,83.3,83.3
+chunking_study,per_section_no_header,False,66.7,75.0,75.0,75.0
+chunking_study,per_section_with_header,False,66.7,83.3,83.3,83.3
+log_retrieval,fixed_window_unfiltered,False,0.0,0.0,0.0,0.0
+log_retrieval,agent_search_logs_service_pattern,True,100.0,100.0,100.0,100.0

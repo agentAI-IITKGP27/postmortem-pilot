@@ -1,276 +1,189 @@
-"""Deterministic incident tools: UTC normalization and DuckDB log search.
-
-Week 2 Task #4 companion: the ``search_logs`` window experiments compare how
-much of the log corpus each retrieval window has to scan before the evidence
-line is found.
-"""
-
-import csv
-import glob
-import json
-import os
 import re
-import time
-from datetime import datetime, timedelta
-from typing import Any, Dict, Iterable, List, Optional
-
+from datetime import datetime, timezone, timedelta
+from typing import List, Dict, Any, Optional
 import duckdb
+from src.safety.redactor import redact_text, filter_prompt_injections
 
-TZ_OFFSET_MINUTES = {
-    "UTC": 0,
-    "GMT": 0,
-    "IST": 330,
-    "PST": -480,
-    "PDT": -420,
+TZ_OFFSETS = {
+    "UTC": timezone.utc,
+    "Z": timezone.utc,
+    "IST": timezone(timedelta(hours=5, minutes=30)),
+    "PST": timezone(timedelta(hours=-8)),
+    "PDT": timezone(timedelta(hours=-7)),
+    "EST": timezone(timedelta(hours=-5)),
 }
 
-LOG_WINDOW_LIMIT = 50
-_LOCAL_TS_RE = re.compile(r"\[([^\]]+)\]")
-_FLAG_RE = re.compile(r"flagd:([A-Za-z0-9_]+)")
+# Static dependency graph for OpenTelemetry Astronomy Shop services (Tool 7: get_service_deps)
+OTEL_SERVICE_DEPS: Dict[str, List[str]] = {
+    "frontend": ["checkout", "product-catalog", "cart", "recommendation", "ad", "currency", "shipping"],
+    "checkout": ["payment", "cart", "shipping", "currency", "email", "kafka", "product-catalog"],
+    "payment": ["payment-db", "flagd"],
+    "product-catalog": ["catalog-db", "flagd"],
+    "recommendation": ["product-catalog", "redis-cache", "flagd"],
+    "ad": ["flagd"],
+    "kafka": ["checkout", "accounting", "fraud-detection", "flagd"],
+    "cart": ["redis-cart", "flagd"],
+    "shipping": ["quote", "flagd"],
+    "currency": ["flagd"],
+    "email": ["flagd"],
+    "accounting": ["kafka", "postgres- accounting"],
+    "fraud-detection": ["kafka", "flagd"],
+    "image-provider": ["frontend", "flagd"],
+    "load-generator": ["frontend", "flagd"],
+}
 
+LINE_REGEX = re.compile(
+    r"^(?P<ev_id>(?:LOG:[a-zA-Z0-9_-]+:\d+|TICKET:\d+|CHAT:\d+))\s+"
+    r"\[(?P<ts>[^\]]+)\]\s+(?P<msg>.*)$"
+)
 
-def normalize_to_utc(timestamp: str, tz_hint: Optional[str] = None) -> str:
-    """Convert an IST/PST/UTC timestamp into ``YYYY-MM-DD HH:MM:SSZ`` (UTC)."""
-    text = re.sub(r"(\d)T(\d{2}:)", r"\1 \2", timestamp.strip())
-    tz_name = (tz_hint or "").upper()
+# Tool 1: redact_secrets
+def redact_secrets(text: str) -> Dict[str, Any]:
+    cleaned, counts = redact_text(text)
+    return {"redacted_text": cleaned, "redaction_counts": counts}
 
-    if text.endswith("Z"):
-        return text[:-1] + "Z"
+# Tool 3: normalise_time
+def normalise_time(ts_str: str) -> Optional[str]:
+    ts_clean = ts_str.strip()
+    parts = ts_clean.split()
+    tz_label = "UTC"
+    if len(parts) == 3 and parts[2].upper() in TZ_OFFSETS:
+        dt_part = f"{parts[0]} {parts[1]}"
+        tz_label = parts[2].upper()
+    elif ts_clean.endswith("Z"):
+        dt_part = ts_clean[:-1].replace("T", " ")
+        tz_label = "UTC"
+    else:
+        return None
 
-    # Explicit offset, e.g. 2026-11-05 12:00:00+05:30
-    offset_match = re.search(r"([+-]\d{2}:?\d{2})$", text)
-    if offset_match:
-        raw_offset = offset_match.group(1)
-        sign = 1 if raw_offset[0] == "+" else -1
-        digits = raw_offset[1:].replace(":", "")
-        offset = sign * (int(digits[:2]) * 60 + int(digits[2:]))
-        naive = datetime.strptime(text[: offset_match.start()].strip(), "%Y-%m-%d %H:%M:%S")
-        return (naive - timedelta(minutes=offset)).strftime("%Y-%m-%d %H:%M:%SZ")
+    try:
+        dt_naive = datetime.strptime(dt_part, "%Y-%m-%d %H:%M:%S")
+        dt_local = dt_naive.replace(tzinfo=TZ_OFFSETS[tz_label])
+        dt_utc = dt_local.astimezone(timezone.utc)
+        return dt_utc.strftime("%Y-%m-%d %H:%M:%SZ")
+    except Exception:
+        return None
 
-    # Trailing timezone name, e.g. 2026-11-05 12:00:00 IST
-    parts = text.split()
-    if parts and parts[-1].isalpha() and parts[-1].upper() in TZ_OFFSET_MINUTES:
-        tz_name = parts[-1].upper()
-        text = " ".join(parts[:-1])
+# Backward-compatible alias
+parse_to_utc = normalise_time
 
-    if tz_name not in TZ_OFFSET_MINUTES:
-        raise ValueError(f"Unknown timezone {tz_hint!r} in {timestamp!r}")
+# Tool 2: parse_incident_bundle
+def parse_incident_bundle(raw_text: str) -> Dict[str, Any]:
+    raw_lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    safe_lines, quarantined = filter_prompt_injections(raw_lines)
 
-    naive = datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
-    utc_dt = naive - timedelta(minutes=TZ_OFFSET_MINUTES[tz_name])
-    return utc_dt.strftime("%Y-%m-%d %H:%M:%SZ")
+    events: List[Dict[str, str]] = []
+    missing_tz = False
 
+    for line in safe_lines:
+        if line.startswith("RUNBOOK_CONTEXT:") or line.startswith("PAST_PM_CONTEXT:"):
+            continue
+        m = LINE_REGEX.match(line)
+        if not m:
+            continue
+        ev_id = m.group("ev_id")
+        ts_local = m.group("ts")
+        msg = redact_secrets(m.group("msg"))["redacted_text"]
 
-def parse_utc(value: str) -> datetime:
-    """Parse a normalized UTC string into a naive UTC datetime for DuckDB."""
-    return datetime.strptime(value, "%Y-%m-%d %H:%M:%SZ")
+        ts_utc = normalise_time(ts_local)
+        if not ts_utc:
+            missing_tz = True
+            ts_utc = ts_local
 
+        svc = "frontend"
+        if ev_id.startswith("LOG:"):
+            svc = ev_id.split(":")[1]
+        elif "upstream:" in msg:
+            svc_match = re.search(r"upstream:\s*([a-zA-Z0-9_-]+)", msg)
+            if svc_match:
+                svc = svc_match.group(1)
 
-def load_bundle_files(bundles_dir: str = "data/bundles") -> List[Dict[str, Any]]:
-    paths = sorted(glob.glob(os.path.join(bundles_dir, "bundle_*.json")))
-    bundles = []
-    for path in paths:
-        with open(path) as handle:
-            bundles.append(json.load(handle))
-    return bundles
+        events.append({
+            "timestamp_utc": ts_utc,
+            "timestamp_local": ts_local,
+            "service": svc,
+            "event": msg,
+            "evidence_id": ev_id,
+        })
 
+    events.sort(key=lambda x: x["timestamp_utc"])
+    primary_svc = next((e["service"] for e in events if e["service"] != "frontend"), "unknown")
 
-def bundle_log_rows(bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Flatten a bundle's lines into log rows with a normalized UTC timestamp."""
-    tz_name = bundle.get("timezone", "UTC")
-    rows = []
-    for line in bundle.get("lines", []):
-        raw = line.get("raw", "")
-        local_match = _LOCAL_TS_RE.search(raw)
-        if local_match:
-            ts_utc = normalize_to_utc(local_match.group(1), tz_name)
-        else:
-            ts_utc = line["timestamp_utc"]
-        rows.append(
-            {
-                "incident_id": bundle["bundle_id"],
-                "line_id": line["id"],
-                "line_no": int(str(line["id"]).rsplit(":", 1)[-1])
-                if str(line["id"]).rsplit(":", 1)[-1].isdigit()
-                else 0,
-                "ts_utc": ts_utc,
-                "service": line.get("service", bundle["affected_services"][0]),
-                "message": raw,
-            }
-        )
-    return rows
+    return {
+        "events": events,
+        "primary_service": primary_svc,
+        "missing_timezone": missing_tz,
+        "quarantined_injections": quarantined,
+    }
 
+parse_bundle_lines = parse_incident_bundle
 
-def build_incident_db(bundles: Iterable[Dict[str, Any]]) -> duckdb.DuckDBPyConnection:
-    """Create an in-memory DuckDB table containing every bundle line."""
-    con = duckdb.connect()
-    con.execute(
-        """
-        CREATE TABLE logs (
-            incident_id VARCHAR,
-            line_id VARCHAR,
-            line_no INTEGER,
-            ts_utc TIMESTAMP,
-            service VARCHAR,
-            message VARCHAR
-        )
-        """
-    )
-    rows = []
-    for bundle in bundles:
-        for row in bundle_log_rows(bundle):
-            rows.append(
-                (
-                    row["incident_id"],
-                    row["line_id"],
-                    row["line_no"],
-                    parse_utc(row["ts_utc"]),
-                    row["service"],
-                    row["message"],
-                )
-            )
-    if rows:
-        con.executemany("INSERT INTO logs VALUES (?, ?, ?, ?, ?, ?)", rows)
-    return con
-
-
+# Tool 4: search_logs (DuckDB SQL over time window, service, and pattern; max 50 lines)
 def search_logs(
-    con: duckdb.DuckDBPyConnection,
+    events: List[Dict[str, str]],
     service: Optional[str] = None,
+    pattern: Optional[str] = None,
     start_utc: Optional[str] = None,
     end_utc: Optional[str] = None,
-    keyword: Optional[str] = None,
-    incident_id: Optional[str] = None,
-    limit: int = LOG_WINDOW_LIMIT,
-) -> List[Dict[str, Any]]:
-    """Filter logs by service, UTC window and keyword; capped at 50 rows (C1)."""
-    clauses = ["1 = 1"]
-    params: List[Any] = []
-    if incident_id:
-        clauses.append("incident_id = ?")
-        params.append(incident_id)
+    limit: int = 50,
+) -> List[Dict[str, str]]:
+    if not events:
+        return []
+    con = duckdb.connect(":memory:")
+    con.execute("CREATE TABLE logs (timestamp_utc VARCHAR, timestamp_local VARCHAR, service VARCHAR, event VARCHAR, evidence_id VARCHAR)")
+    for e in events:
+        con.execute("INSERT INTO logs VALUES (?, ?, ?, ?, ?)", [e["timestamp_utc"], e["timestamp_local"], e["service"], e["event"], e["evidence_id"]])
+
+    query = "SELECT timestamp_utc, timestamp_local, service, event, evidence_id FROM logs WHERE 1=1"
+    params = []
     if service:
-        clauses.append("service = ?")
-        params.append(service)
+        query += " AND (lower(service) = lower(?) OR lower(event) LIKE lower(?))"
+        params.extend([service, f"%{service}%"])
+    if pattern:
+        query += " AND lower(event) LIKE lower(?)"
+        params.append(f"%{pattern}%")
     if start_utc:
-        clauses.append("ts_utc >= ?")
-        params.append(parse_utc(start_utc))
+        query += " AND timestamp_utc >= ?"
+        params.append(start_utc)
     if end_utc:
-        clauses.append("ts_utc <= ?")
-        params.append(parse_utc(end_utc))
-    if keyword:
-        clauses.append("lower(message) LIKE ?")
-        params.append(f"%{keyword.lower()}%")
+        query += " AND timestamp_utc <= ?"
+        params.append(end_utc)
+    query += f" ORDER BY timestamp_utc ASC LIMIT {min(limit, 50)}"
 
-    capped = max(1, min(int(limit), LOG_WINDOW_LIMIT))
-    sql = (
-        "SELECT incident_id, line_id, line_no, ts_utc, service, message "
-        f"FROM logs WHERE {' AND '.join(clauses)} "
-        f"ORDER BY ts_utc, line_no LIMIT {capped}"
-    )
-    cursor = con.execute(sql, params)
-    columns = [col[0] for col in cursor.description]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    rows = con.execute(query, params).fetchall()
+    return [
+        {"timestamp_utc": r[0], "timestamp_local": r[1], "service": r[2], "event": r[3], "evidence_id": r[4]}
+        for r in rows
+    ]
 
+search_logs_duckdb = search_logs
 
-def _fault_flag(bundle: Dict[str, Any]) -> Optional[str]:
-    for line in bundle.get("lines", []):
-        match = _FLAG_RE.search(line.get("raw", ""))
-        if match:
-            return match.group(1)
-    return None
+# Tool 5: search_runbooks
+def search_runbooks(retriever, query: str, service: Optional[str] = None, top_k: int = 3) -> List[Dict[str, Any]]:
+    return retriever.search(query=query, doc_type="runbook", service_filter=service, top_k=top_k)
 
+# Tool 6: search_past_postmortems
+def search_past_postmortems(retriever, query: str, service: Optional[str] = None, top_k: int = 3) -> List[Dict[str, Any]]:
+    return retriever.search(query=query, doc_type="postmortem", service_filter=service, top_k=top_k)
 
-def run_window_experiments(
-    bundles_dir: str = "data/bundles",
-    out_path: str = "results/duckdb_window_experiment.csv",
-    windows: Iterable[Optional[int]] = (1, 2, 5, 10, 12, 15, None),
-) -> List[Dict[str, Any]]:
-    """Measure how much incident evidence each ``search_logs`` window captures."""
-    bundles = load_bundle_files(bundles_dir)
-    con = build_incident_db(bundles)
-    results: List[Dict[str, Any]] = []
+# Tool 7: get_service_deps
+def get_service_deps(service: str) -> Dict[str, Any]:
+    svc = service.lower().strip()
+    downstream = OTEL_SERVICE_DEPS.get(svc, [])
+    upstream = [k for k, v in OTEL_SERVICE_DEPS.items() if svc in v]
+    return {"service": svc, "depends_on": downstream, "called_by": upstream}
 
-    for window in windows:
-        evidence_recall = 0.0
-        recovery_found = 0
-        candidates = 0
-        timings = []
-
-        for bundle in bundles:
-            anchor = min(parse_utc(row["ts_utc"]) for row in bundle_log_rows(bundle))
-            start = anchor - timedelta(minutes=window) if window else None
-            end = anchor + timedelta(minutes=window) if window else None
-
-            started = time.perf_counter()
-            rows = search_logs(
-                con,
-                start_utc=start.strftime("%Y-%m-%d %H:%M:%SZ") if start else None,
-                end_utc=end.strftime("%Y-%m-%d %H:%M:%SZ") if end else None,
-                incident_id=bundle["bundle_id"],
-            )
-            timings.append((time.perf_counter() - started) * 1000)
-
-            candidates += len(rows)
-            gold_ids = {line["id"] for line in bundle.get("lines", [])}
-            found_ids = {row["line_id"] for row in rows}
-            evidence_recall += len(gold_ids & found_ids) / len(gold_ids) if gold_ids else 0.0
-            if "CHAT:2" in found_ids:
-                recovery_found += 1
-
-        total = len(bundles)
-        results.append(
-            {
-                "window_minutes": "full_scan" if window is None else window,
-                "num_incidents": total,
-                "evidence_recall": round(evidence_recall / total, 4) if total else 0.0,
-                "recovery_line_recall": round(recovery_found / total, 4) if total else 0.0,
-                "avg_candidates": round(candidates / total, 2) if total else 0.0,
-                "avg_latency_ms": round(sum(timings) / len(timings), 3) if timings else 0.0,
-            }
-        )
-
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, "w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(results[0].keys()))
-        writer.writeheader()
-        writer.writerows(results)
-
-    return results
-
-
-def _demo() -> None:
-    print("UTC normalization:")
-    for value, tz in [
-        ("2026-11-05 17:30:00 IST", "IST"),
-        ("2026-11-05 02:00:00 PST", "PST"),
-        ("2026-11-05 10:00:00 UTC", "UTC"),
-    ]:
-        print(f"  {value:<26} -> {normalize_to_utc(value, tz)}")
-
-    bundles = load_bundle_files()
-    con = build_incident_db(bundles)
-    sample = bundles[0]
-    rows = search_logs(
-        con,
-        service=sample["affected_services"][0],
-        keyword=_fault_flag(sample),
-    )
-    print(f"\nsearch_logs() returned {len(rows)} row(s) for {sample['bundle_id']}:")
-    for row in rows[:3]:
-        print(f"  {row['ts_utc']} {row['line_id']} {row['message'][:90]}")
-
-    results = run_window_experiments()
-    print("\nDuckDB window experiment:")
-    for row in results:
-        print(
-            f"  window={str(row['window_minutes']):<9} "
-            f"evidence_recall={row['evidence_recall']:.3f} "
-            f"recovery_recall={row['recovery_line_recall']:.3f} "
-            f"avg_candidates={row['avg_candidates']}"
-        )
-    print("\nSaved results/duckdb_window_experiment.csv")
-
+# Tool 8: create_ticket_draft
+def create_ticket_draft(title: str, owner_role: str, priority: str, description: str) -> Dict[str, Any]:
+    return {
+        "title": title,
+        "owner_role": owner_role,
+        "priority": priority,
+        "due_days": 7 if priority == "P0" else 14,
+        "description": description,
+        "status": "DRAFT",
+        "requires_human_confirmation": True,
+    }
 
 if __name__ == "__main__":
-    _demo()
+    print("Service deps for checkout:", get_service_deps("checkout"))

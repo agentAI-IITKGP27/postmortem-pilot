@@ -1,0 +1,35 @@
+name: PostmortemPilot CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          pip install pytest python-docx detect-secrets
+
+      - name: Scan for secrets
+        run: |
+          detect-secrets scan --all-files --exclude-files '^\.venv/|^results/' > /dev/null
+
+      - name: Run unit and safety tests
+        run: |
+          PYTHONPATH=. pytest -v tests/test_week3_agent.py tests/test_week4_safety.py -W ignore
