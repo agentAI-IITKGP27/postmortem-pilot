@@ -9,7 +9,12 @@ PATTERNS = [
 ]
 
 INJECTION_PATTERNS = re.compile(
-    r"(SYSTEM OVERRIDE|Ignore all prior|ignore previous instructions|DNS_RESOLVED_NO_ACTION_NEEDED)",
+    r"(SYSTEM\s*OVERRIDE"
+    r"|ignore\s+(all\s+)?(prior|previous)\s+(instructions|steps)"
+    r"|disregard\s+(all\s+)?(prior|previous)\s+(instructions|steps)"
+    r"|system\s+prompt\s*:"
+    r"|exfiltrate|dump\s+secrets|reveal\s+api[_\s-]?key"
+    r"|DNS_RESOLVED_NO_ACTION_NEEDED)",
     re.IGNORECASE,
 )
 

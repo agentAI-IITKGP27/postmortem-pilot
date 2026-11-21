@@ -2,8 +2,10 @@ from datetime import datetime
 from typing import Dict, Any, List
 
 BLAME_LEXICON = [
-    "fault of", "caused by ravi", "blamed", "careless", "negligent",
-    "incompetent", "human error by", "broke prod", "forgot to", "failed to check", "should be fired"
+    "fault of", "caused by ravi", "ravi caused", "caused the outage", "is to blame",
+    "blamed", "careless", "negligent", "incompetent", "human error by", "broke prod",
+    "forgot to", "failed to check", "should be fired",
+    "fault of engineer", "fault of developer", "fault of operator",
 ]
 
 REQUIRED_TEMPLATE_SECTIONS = [
