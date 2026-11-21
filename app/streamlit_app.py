@@ -261,7 +261,10 @@ def main():
             export_res = st.session_state.get("ticket_export_result")
             if export_res is not None:
                 if export_res["exported"]:
-                    st.success(f"{export_res['reason']} Status: `{export_res['ticket']['status']}`")
+                    st.success(
+                        f"{export_res['reason']} Ticket approved and exported "
+                        f"(status: `{export_res['ticket']['status']}`)."
+                    )
                     st.json(export_res["ticket"])
                 else:
                     st.warning(export_res["reason"])

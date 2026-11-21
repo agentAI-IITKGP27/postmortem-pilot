@@ -1,4 +1,7 @@
+import hashlib
+import math
 import os
+import re
 import time
 import threading
 from typing import List
@@ -10,9 +13,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Chat LLM Configuration (Port 1033)
-API_KEY = os.getenv("OPENAI_API_KEY", "")
-BASE_URL = os.getenv("OPENAI_BASE_URL", "https://103.42.50.41:1033/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen3-8B")
+API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("UNI_API_KEY", "")
+BASE_URL = os.getenv("OPENAI_BASE_URL") or os.getenv("UNI_BASE_URL", "https://103.42.50.41:1033/v1")
+MODEL_NAME = os.getenv("MODEL_NAME") or os.getenv("UNI_MODEL_NAME", "Qwen/Qwen3-8B")
 CERT_PATH = os.getenv("SSL_CERT_FILE", "certs/vm05-ca.crt")
 
 # Embedding API Configuration (Port 1035)
@@ -68,7 +71,33 @@ def call_structured(messages, response_model, max_tokens=512, temperature=0.1, m
                 raise e
             time.sleep(delay)
 
+_EMBED_API_DISABLED = False
+_EMBED_FALLBACK_ENABLED = os.getenv("EMBEDDINGS_LOCAL_FALLBACK", "1") != "0"
+_EMBED_DIM = 384
+
+
+def _hash_embed(text: str, dim: int = _EMBED_DIM) -> List[float]:
+    """Deterministic offline embedding (hashed bag-of-words + prefixes).
+
+    Used when the university embedding API is unreachable or rejects the key so
+    that dense retrieval still has a stable vector space to work with.
+    """
+    vec = [0.0] * dim
+    tokens = re.findall(r"[a-z0-9_:-]+", text.lower())
+    for tok in tokens:
+        for feat in (tok, tok[:4]):
+            idx = int(hashlib.md5(feat.encode("utf-8")).hexdigest(), 16) % dim
+            vec[idx] += 1.0
+    norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+    return [v / norm for v in vec]
+
+
 def call_embeddings(texts: List[str]) -> List[List[float]]:
+    global _EMBED_API_DISABLED
+
+    if _EMBED_API_DISABLED:
+        return [_hash_embed(t) for t in texts]
+
     all_vectors: List[List[float]] = []
     batch_size = 16
 
@@ -86,6 +115,13 @@ def call_embeddings(texts: List[str]) -> List[List[float]]:
                 break
             except Exception as e:
                 if delay == 0:
+                    if _EMBED_FALLBACK_ENABLED:
+                        print(
+                            "[llm] Embedding API unavailable "
+                            f"({type(e).__name__}); switching to local hash embeddings."
+                        )
+                        _EMBED_API_DISABLED = True
+                        return [_hash_embed(t) for t in texts]
                     raise e
                 time.sleep(delay)
 

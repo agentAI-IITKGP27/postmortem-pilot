@@ -72,7 +72,7 @@ def export_ticket_if_approved(ticket: dict[str, Any], human_approved: bool) -> d
             "ticket": gated,
         }
     gated["approved"] = True
-    gated["status"] = "EXPORTED_DRAFT_PAYLOAD"
+    gated["status"] = "APPROVED_FOR_EXPORT"
     return {
         "exported": True,
         "reason": "Explicitly approved by human operator.",
