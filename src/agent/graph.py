@@ -160,6 +160,8 @@ def triage_node(state: IncidentState) -> IncidentState:
         }
 
     events = parsed["events"]
+    for event in events:
+        event["event"] = sanitize_blame_text(event["event"])
     primary_svc = parsed["primary_service"]
 
     if parsed["missing_timezone"] or primary_svc == "unknown" or len(events) == 0:

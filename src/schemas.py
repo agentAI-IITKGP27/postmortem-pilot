@@ -57,15 +57,13 @@ class CriticVerdict(BaseModel):
     revision_instructions: Optional[str] = Field(default=None, description="Specific instructions for the Drafter to fix failures")
 
 if __name__ == "__main__":
-    from src.llm import get_llm_client
-    _, structured_client, model_name = get_llm_client()
+    from src.llm import call_structured
 
     sample_input = (
         "CHAT:1 [2026-11-05 14:02:00 UTC] @oncall: Checkout errors spiking to 45%!\n"
         "LOG:payment:104 [2026-11-05 14:01:55 UTC] ERROR Connection refused to payment-db:5432"
     )
-    res = structured_client.chat.completions.create(
-        model=model_name,
+    res = call_structured(
         response_model=TriageOutput,
         messages=[
             {"role": "system", "content": "Extract incident triage metadata from the bundle snippet."},

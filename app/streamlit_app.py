@@ -1,6 +1,8 @@
 import json
 import os
 import time
+from uuid import uuid4
+
 import streamlit as st
 
 from src.agent.graph import build_postmortem_graph, invoke_with_trace
@@ -28,6 +30,7 @@ st.markdown("""
     .main-header { font-size: 2.2rem; font-weight: 700; color: #1E293B; }
     .sub-header { font-size: 1.1rem; color: #64748B; }
     .badge-success { background-color: #DCFCE7; color: #166534; padding: 0.25rem 0.75rem; border-radius: 9999px; font-weight: 600; font-size: 0.85rem; }
+    .badge-warning { background-color: #FEF3C7; color: #92400E; padding: 0.25rem 0.75rem; border-radius: 9999px; font-weight: 600; font-size: 0.85rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -79,6 +82,9 @@ def main():
     limiter = get_rate_limiter()
     cache = get_response_cache()
 
+    if "thread_id" not in st.session_state:
+        st.session_state["thread_id"] = f"sre-{uuid4().hex[:8]}"
+
     st.sidebar.header("Investigation Controls")
     mode = st.sidebar.radio("Input Source", ["Select Benchmark Bundle", "Upload / Paste Incident Bundle"])
 
@@ -103,7 +109,7 @@ def main():
 
     user_prompt = st.sidebar.text_input("Investigator Prompt / Focus", value="Perform a full root-cause analysis and generate action items.")
     use_live_llm = st.sidebar.checkbox("Enable Live LLM Synthesis", value=False)
-    thread_id = st.sidebar.text_input("Conversation Thread ID", value="sre-session-01")
+    thread_id = st.sidebar.text_input("Conversation Thread ID", key="thread_id")
 
     if st.sidebar.button("🚀 Run Agent Investigation", type="primary"):
         try:
@@ -165,7 +171,13 @@ def main():
 
         with tab_summary:
             st.markdown("### Executive Summary & Root Cause")
-            st.markdown('<span class="badge-success">Critic Status: Verified & Blameless</span>', unsafe_allow_html=True)
+            if state.get("critic_passed"):
+                st.markdown('<span class="badge-success">Critic Status: Verified &amp; Blameless</span>', unsafe_allow_html=True)
+            else:
+                st.markdown(
+                    '<span class="badge-warning">Critic Status: Critic revisions exhausted — human review required</span>',
+                    unsafe_allow_html=True,
+                )
             st.write("")
 
             col1, col2 = st.columns(2)
@@ -181,12 +193,18 @@ def main():
                 else:
                     st.warning(f"{severity} - HITL Gated Workflow")
 
+            report = state.get("report") or {}
             st.markdown("#### Root Cause Analysis")
-            st.markdown(f"> {state.get('root_cause', 'No root cause synthesized.')}")
+            root_cause = report.get("root_cause") or state.get("root_cause") or "Not available in the agent state."
+            st.markdown(f"> {root_cause}")
 
             st.markdown("#### Contributing Factors")
-            for factor in state.get("contributing_factors") or ["Systemic process or configuration gap"]:
-                st.markdown(f"- {factor}")
+            factors = report.get("contributing_factors") or state.get("contributing_factors") or []
+            if factors:
+                for factor in factors:
+                    st.markdown(f"- {factor}")
+            else:
+                st.caption("No contributing factors recorded.")
 
             st.markdown("---")
             st.markdown("#### Export Postmortem Report")
@@ -221,8 +239,9 @@ def main():
                 st.info("No timeline events extracted.")
 
             st.markdown("### Runbook Gaps Identified")
-            st.markdown(f"**Runbook ID:** `{state.get('runbook_id', 'RUNBOOK:001')}`")
-            st.markdown(f"**Expected Action:** {state.get('expected_action', 'Standard verification check')}")
+            gap = state.get("runbook_gap") or {}
+            st.markdown(f"**Runbook ID:** `{gap.get('runbook_id', 'Not identified')}`")
+            st.markdown(f"**Expected Action:** {gap.get('expected_action', 'No runbook gap identified.')}")
 
         with tab_evidence:
             st.markdown("### Redacted Log Bundle & Evidence Explorer")
@@ -241,7 +260,7 @@ def main():
             st.markdown("### Human-in-the-Loop (HITL) Operational Gate")
             st.markdown("Tickets remain in **DRAFT** (`requires_human_confirmation=True`) until explicitly approved.")
 
-            ticket = prepare_hitl_ticket(state.get("ticket_draft"))
+            ticket = prepare_hitl_ticket(state.get("action_item") or state.get("ticket_draft"))
             st.json(ticket)
 
             human_confirmed = st.checkbox(

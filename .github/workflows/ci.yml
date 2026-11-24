@@ -28,8 +28,8 @@ jobs:
 
       - name: Scan for secrets
         run: |
-          detect-secrets scan --all-files --exclude-files '^\.venv/|^results/' > /dev/null
+          git ls-files -z | xargs -0 detect-secrets-hook --baseline .secrets.baseline
 
       - name: Run unit and safety tests
         run: |
-          PYTHONPATH=. pytest -v tests/test_week3_agent.py tests/test_week4_safety.py -W ignore
+          PYTHONPATH=. pytest -v tests/ -W ignore

@@ -42,6 +42,6 @@ def filter_prompt_injections(lines: List[str]) -> Tuple[List[str], List[str]]:
     return safe_lines, quarantined
 
 if __name__ == "__main__":
-    sample = "User admin@corp.com connected from 10.24.1.99 using sk-moLgioCnQ0R9cfqtJVF0zaTv"
+    sample = "User admin@corp.com connected from 10.24.1.99 using sk-demo-1234567890abcdef"
     cleaned, stats = redact_text(sample)
     print("Redacted:", cleaned, "| Counts:", stats)
